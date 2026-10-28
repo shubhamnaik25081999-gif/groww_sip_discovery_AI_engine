@@ -14,7 +14,7 @@ import { AnalysisOrchestrator } from '@/services/ai';
 import { ReviewService } from '@/services/review';
 import { EvaluationService } from '@/services/evaluation';
 import { OpportunityService } from '@/services/opportunity';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import { computeContentHash } from '@/lib/hashing';
 
@@ -266,17 +266,27 @@ export async function seedBenchmarkData() {
   // 1. Idempotently Ingest Synthetic Benchmark Fixtures & Register Golden Labels
   for (const item of BENCHMARK_ITEMS) {
     const contentHash = computeContentHash(item.originalText);
-    const existing = await db
+
+    // CRITICAL: Only look for existing SYNTHETIC FIXTURES, never match user records.
+    // This prevents the seeder from ever finding or modifying genuine user-imported records
+    // even if they have identical content text.
+    const existingFixture = await db
       .select()
       .from(evidenceRecords)
-      .where(eq(evidenceRecords.contentHash, contentHash))
+      .where(
+        and(
+          eq(evidenceRecords.contentHash, contentHash),
+          eq(evidenceRecords.isSynthetic, true),
+          eq(evidenceRecords.entryMethod, 'fixture')
+        )
+      )
       .limit(1);
 
     let recordId: string;
 
-    if (existing.length > 0) {
-      recordId = existing[0].id;
-      // Ensure synthetic and verification status are safely marked without deleting data
+    if (existingFixture.length > 0) {
+      // Found an existing fixture with same content — just refresh its timestamp
+      recordId = existingFixture[0].id;
       await db
         .update(evidenceRecords)
         .set({
@@ -286,6 +296,9 @@ export async function seedBenchmarkData() {
         })
         .where(eq(evidenceRecords.id, recordId));
     } else {
+      // No matching fixture exists. Insert a new one.
+      // Note: if a user record with the same content exists, createManualRecord
+      // will set duplicateOfId (informational only) but NEVER modify the user record.
       const res = await EvidenceService.createManualRecord(
         {
           sourceUrl: item.sourceUrl,
