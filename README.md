@@ -89,6 +89,24 @@ npm test
 
 ---
 
+## ☁️ Deploying to Vercel
+
+1. **Import Project into Vercel**:
+   - Link your GitHub repository (`groww_sip_discovery_AI_engine`).
+   - Keep **Root Directory** as `./` (default).
+   - Framework preset will automatically be detected as **Next.js**.
+
+2. **Environment Variables (Optional)**:
+   - `GEMINI_API_KEY`: *(Optional)* Your Google Gemini API key for live analysis runs.
+   - `DATABASE_URL`: *(Optional)* Your [Turso](https://turso.tech) LibSQL URL (`libsql://<your-db>.turso.io`) for persistent cloud database storage across serverless instances.
+   - `DATABASE_AUTH_TOKEN`: *(Optional)* Turso authentication token.
+   *(If no database URL is set, the app runs using `/tmp` serverless SQLite).*
+
+3. **Deploy**:
+   - Click **Deploy**. Next.js Turbopack build and TypeScript validation will compile cleanly.
+
+---
+
 ## 📂 Project Structure
 
 ```
