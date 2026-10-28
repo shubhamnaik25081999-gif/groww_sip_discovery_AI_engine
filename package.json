@@ -6,19 +6,33 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@google/genai": "^2.31.0",
+    "@libsql/client": "^0.18.0",
+    "d3-force": "^3.0.0",
+    "drizzle-orm": "^0.45.4",
     "next": "16.4.3",
+    "papaparse": "^5.7.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/d3-force": "^3.0.10",
+    "@types/node": "^24.19.2",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
-    "typescript": "^5"
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.0.5"
   }
 }

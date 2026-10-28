@@ -1,0 +1,336 @@
+import { db, initializeDatabase } from '@/db';
+import {
+  evidenceRecords,
+  analysisRuns,
+  recordAnalyses,
+  reviews,
+  goldenLabels,
+  failureCases,
+  themes,
+  researchQuestions,
+  contradictions,
+  opportunities,
+} from '@/db/schema';
+import { EvidenceService } from './evidence';
+import { EvaluationService } from './evaluation';
+import { ReviewService } from './review';
+import { OpportunityService } from './opportunity';
+import { eq, desc } from 'drizzle-orm';
+
+export interface EvidenceLogExportData {
+  metadata: {
+    exportDate: string;
+    engineVersion: string;
+    productName: string;
+    businessObjective: string;
+    disclaimer: string;
+  };
+  summary: {
+    totalEvidenceRecords: number;
+    realRecordsCount: number;
+    syntheticRecordsCount: number;
+    distinctSourcePlatforms: string[];
+    dateRange: string;
+    duplicateCount: number;
+    provenanceBreakdown: {
+      verifiedLive: number;
+      curatedBenchmark: number;
+      userEntered: number;
+      unverified: number;
+    };
+    analysisRunsCount: number;
+    totalGoldenLabels: number;
+    documentedFailureCases: number;
+  };
+  latestAnalysisRun: any;
+  latestEvaluation: any;
+  failureCases: any[];
+  opportunities: any[];
+  contradictions: any[];
+  openResearchQuestions: any[];
+  knownLimitations: string[];
+}
+
+export class ExportService {
+  /**
+   * Compiles the complete dataset for Evidence Log export
+   */
+  static async compileExportData(): Promise<EvidenceLogExportData> {
+    await initializeDatabase();
+
+    const allRecords = await db.select().from(evidenceRecords).all();
+    const realRecords = allRecords.filter((r) => !r.isSynthetic);
+    const syntheticRecords = allRecords.filter((r) => r.isSynthetic);
+    const duplicateCount = allRecords.filter((r) => r.duplicateOfId).length;
+
+    const dates = allRecords
+      .map((r) => r.collectedAt)
+      .filter(Boolean)
+      .sort();
+    const dateRange =
+      dates.length > 0 ? `${dates[0]} to ${dates[dates.length - 1]}` : 'N/A';
+
+    const platforms = Array.from(new Set(allRecords.map((r) => r.platform)));
+    const runs = await db
+      .select()
+      .from(analysisRuns)
+      .orderBy(desc(analysisRuns.startedAt))
+      .limit(1);
+    const latestRun = runs.length > 0 ? runs[0] : null;
+
+    const latestEval = await EvaluationService.getLatestEvaluation();
+    const failureList = await ReviewService.listFailureCases();
+    const questions = await db.select().from(researchQuestions).all();
+    const contradictionList = await db.select().from(contradictions).all();
+    const oppList = await OpportunityService.listOpportunities();
+    const provBreakdown = await EvidenceService.getProvenanceBreakdown();
+
+    return {
+      metadata: {
+        exportDate: new Date().toISOString(),
+        engineVersion: '2.0.0-fellowship-graduation',
+        productName: 'Groww (SIP Retention Intelligence)',
+        businessObjective:
+          'Increase percentage of first-time mutual fund investors who maintain an active SIP 12 months after inception (active = >=1 instalment in past 30 days).',
+        disclaimer:
+          'Independent student prototype for NextLeap PM Fellowship. Not an official Groww product. Does not provide investment advice.',
+      },
+      summary: {
+        totalEvidenceRecords: allRecords.length,
+        realRecordsCount: realRecords.length,
+        syntheticRecordsCount: syntheticRecords.length,
+        distinctSourcePlatforms: platforms,
+        dateRange,
+        duplicateCount,
+        provenanceBreakdown: provBreakdown,
+        analysisRunsCount: (await db.select().from(analysisRuns).all()).length,
+        totalGoldenLabels: (await db.select().from(goldenLabels).all()).length,
+        documentedFailureCases: failureList.length,
+      },
+      latestAnalysisRun: latestRun,
+      latestEvaluation: latestEval,
+      failureCases: failureList,
+      opportunities: oppList,
+      contradictions: contradictionList,
+      openResearchQuestions: questions,
+      knownLimitations: [
+        'Absence of Long-Term Retention Data: Public store reviews and social discussions reflect point-in-time sentiments; actual 12-month active continuation must be verified with Groww internal ledger cohort data.',
+        'Investor Persona Ambiguity: First-time investor status is rarely stated explicitly by users in app store reviews, necessitating careful handling of unverified context.',
+        'Platform Selection Bias: Play Store and Reddit over-index on severe failures (e.g. unexpected bank mandate charges) while satisfied retained users rarely leave unsolicited reviews.',
+        'Small Golden-Set Sample: Evaluation against ~20 curated golden labels provides an initial diagnostic for obvious failure modes, not statistical proof of model generalization.',
+      ],
+    };
+  }
+
+  /**
+   * Generates a formal Markdown Evidence Log Report
+   */
+  static async generateMarkdownReport(): Promise<string> {
+    const data = await this.compileExportData();
+
+    const lines: string[] = [];
+
+    lines.push('# Groww SIP Intelligence Lab — Evidence Log & Diagnostic Report');
+    lines.push('');
+    lines.push(`> **Generated**: ${data.metadata.exportDate}  `);
+    lines.push(`> **Engine**: ${data.metadata.engineVersion}  `);
+    lines.push(`> **Target Product**: ${data.metadata.productName}  `);
+    lines.push(`> **Objective**: ${data.metadata.businessObjective}  `);
+    lines.push('');
+    lines.push(`> [!WARNING]`);
+    lines.push(`> **Academic Prototype Notice**: ${data.metadata.disclaimer}`);
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+
+    // Executive Summary & Provenance
+    lines.push('## 1. Executive Summary & Provenance Audit');
+    lines.push('');
+    lines.push(`- **Total Persisted Evidence Records**: ${data.summary.totalEvidenceRecords}`);
+    lines.push(`- **Collection Date Window**: ${data.summary.dateRange}`);
+    lines.push(`- **Detected Duplicates**: ${data.summary.duplicateCount}`);
+    lines.push(`- **Source Platforms Represented**: ${data.summary.distinctSourcePlatforms.join(', ') || 'None'}`);
+    lines.push(`- **Golden-Set Labelled Examples**: ${data.summary.totalGoldenLabels}`);
+    lines.push(`- **Audited Failure Cases**: ${data.summary.documentedFailureCases} ${data.summary.documentedFailureCases >= 3 ? '✅ (Meets Requirement)' : '⚠️ (Under >= 3 Requirement)'}`);
+    lines.push('');
+    lines.push('### Provenance Classification Breakdown');
+    lines.push('');
+    lines.push('| Provenance Tier | Count | Description |');
+    lines.push('|---|---|---|');
+    lines.push(`| **Curated Benchmark (Academic Fixture)** | ${data.summary.provenanceBreakdown.curatedBenchmark} | Authentic investor feedback excerpt curated from public discourse; URL permalink is an academic fixture. |`);
+    lines.push(`| **Live Verified** | ${data.summary.provenanceBreakdown.verifiedLive} | Real-time verified live URL with accessible source page. |`);
+    lines.push(`| **User-Entered** | ${data.summary.provenanceBreakdown.userEntered} | Ingested via manual entry or CSV upload; awaiting verification audit. |`);
+    lines.push(`| **Unverified** | ${data.summary.provenanceBreakdown.unverified} | Raw record with unverified source link. |`);
+    lines.push('');
+
+    // Latest Analysis Run
+    lines.push('## 2. AI Analysis Run Metadata');
+    lines.push('');
+    if (data.latestAnalysisRun) {
+      lines.push(`- **Run ID**: \`${data.latestAnalysisRun.id}\``);
+      lines.push(`- **Provider**: \`${data.latestAnalysisRun.provider}\``);
+      lines.push(`- **Model / Version**: \`${data.latestAnalysisRun.model}\` (\`${data.latestAnalysisRun.modelVersion}\`)`);
+      lines.push(`- **Prompt Version**: \`${data.latestAnalysisRun.promptVersion}\``);
+      lines.push(`- **Schema Version**: \`${data.latestAnalysisRun.schemaVersion}\``);
+      lines.push(`- **Execution Status**: \`${data.latestAnalysisRun.status}\``);
+      lines.push(`- **Successful Records**: ${data.latestAnalysisRun.successfulRecords} / ${data.latestAnalysisRun.totalRecords}`);
+      lines.push(`- **Execution Timestamp**: ${data.latestAnalysisRun.startedAt}`);
+    } else {
+      lines.push('_No analysis runs executed yet._');
+    }
+    lines.push('');
+
+    // Golden Set Evaluation & Error Breakdown
+    lines.push('## 3. Golden-Set Diagnostic Evaluation');
+    lines.push('');
+    if (data.latestEvaluation) {
+      lines.push(`> [!NOTE]`);
+      lines.push(`> **Diagnostic Sample Disclaimer (n = ${data.latestEvaluation.totalGoldenRecords})**: Evaluated against manually labelled blind ground-truth examples. This serves as a diagnostic benchmark to surface failure modes and classification alignment, not mathematical proof of broad model generalization.`);
+      lines.push('');
+      lines.push(`- **Exact Match Agreement**: **${(data.latestEvaluation.accuracy * 100).toFixed(1)}%** (${data.latestEvaluation.exactMatches}/${data.latestEvaluation.totalGoldenRecords})`);
+      if (data.latestEvaluation.abstentionAccuracy !== null) {
+        lines.push(`- **Abstention Accuracy**: **${(data.latestEvaluation.abstentionAccuracy * 100).toFixed(1)}%**`);
+      }
+      lines.push('');
+
+      lines.push('### Per-Theme Classification Performance');
+      lines.push('');
+      lines.push('| Theme | Support | Precision | Recall | F1 | Statistically Meaningful? |');
+      lines.push('|---|---|---|---|---|---|');
+      for (const t of data.latestEvaluation.metricsByTheme) {
+        const prec = t.precision !== null ? `${(t.precision * 100).toFixed(0)}%` : 'N/A';
+        const rec = t.recall !== null ? `${(t.recall * 100).toFixed(0)}%` : 'N/A';
+        const f1 = t.f1 !== null ? `${(t.f1 * 100).toFixed(0)}%` : 'N/A';
+        const flag = t.statisticallyMeaningful ? 'Yes (n ≥ 3)' : '⚠️ Low Support (n < 3)';
+        lines.push(`| ${t.themeName} | ${t.support} | ${prec} | ${rec} | ${f1} | ${flag} |`);
+      }
+      lines.push('');
+
+      lines.push('### Failure Mode Taxonomy');
+      lines.push('');
+      lines.push('| Error Category | Instances | Description |');
+      lines.push('|---|---|---|');
+      const errCats = data.latestEvaluation.commonErrorCategories;
+      lines.push(`| Wrong Theme | ${errCats.wrong_theme || 0} | Assigned to a different theme than golden ground truth |`);
+      lines.push(`| Missed Abstention | ${errCats.missed_abstention || 0} | Fabricated theme on vague or insufficient evidence |`);
+      lines.push(`| Unwarranted Abstention | ${errCats.unwarranted_abstention || 0} | Abstaining despite clear user journey evidence |`);
+      lines.push(`| Unsupported Context | ${errCats.unsupported_context || 0} | Investor context hallucinated without source quote |`);
+      lines.push(`| Excerpt Mismatch | ${errCats.excerpt_mismatch || 0} | Evidence excerpt was not a verbatim quote |`);
+      lines.push(`| No Error (Correct) | ${errCats.none || 0} | Classification aligned with ground truth |`);
+      lines.push('');
+
+      if (data.latestEvaluation.items && data.latestEvaluation.items.length > 0) {
+        lines.push('### Complete Golden-Set Item Inspection (n=20)');
+        lines.push('');
+        lines.push('| # | Verbatim Quote Excerpt | Golden Label | AI Prediction | Agreement | Error Category |');
+        lines.push('|---|---|---|---|---|---|');
+        data.latestEvaluation.items.forEach((item: any, idx: number) => {
+          const excerpt = item.evidenceText.slice(0, 60).replace(/\|/g, '-') + '…';
+          const matchBadge = item.isMatch ? '✅ Match' : '❌ Mismatch';
+          lines.push(`| ${idx + 1} | "${excerpt}" | ${item.actualTheme} | ${item.predictedTheme} | ${matchBadge} | ${item.errorCategory} |`);
+        });
+        lines.push('');
+      }
+    } else {
+      lines.push('_No golden-set evaluation runs executed yet._');
+      lines.push('');
+    }
+
+    // Documented Failure Cases & Lessons Learned
+    lines.push('## 4. Documented Failure Cases & Lessons Learned (RCA Log)');
+    lines.push('');
+    if (data.failureCases.length > 0) {
+      data.failureCases.forEach((fc, idx) => {
+        lines.push(`### Case ${idx + 1}: ${fc.failureType.replace(/_/g, ' ').toUpperCase()}`);
+        lines.push(`- **Platform**: ${fc.platform}`);
+        lines.push(`- **Source Link**: ${fc.sourceUrl}`);
+        lines.push(`- **Verbatim Evidence**: "${fc.evidenceText}"`);
+        lines.push(`- **Reviewer Rationale**: ${fc.reviewerRationale}`);
+        lines.push(`- **Lesson Learned**: ${fc.lessonLearned}`);
+        lines.push(`- **Active Prevention Guard**: ${fc.preventionStrategy}`);
+        lines.push('');
+      });
+    } else {
+      lines.push('_No genuine failure cases recorded yet. The requirement remains incomplete until >= 3 genuine corrected/rejected cases are documented._');
+      lines.push('');
+    }
+
+    // Candidate Opportunities & 7-Criteria Prioritization
+    lines.push('## 5. Candidate Opportunities & 7-Criteria Prioritization');
+    lines.push('');
+    if (data.opportunities && data.opportunities.length > 0) {
+      data.opportunities.forEach((opp: any, idx: number) => {
+        lines.push(`### Opportunity ${idx + 1}: ${opp.title} (Score: ${opp.compositeScore.toFixed(1)}/100)`);
+        lines.push(`- **Problem Statement**: ${opp.problemStatement}`);
+        lines.push(`- **Retention Hypothesis**: ${opp.hypothesisOnRetention}`);
+        lines.push(`- **Provisional Status**: ${opp.status.toUpperCase()} (Decision aid, not predictive forecast)`);
+        lines.push('');
+        lines.push('#### 7-Criteria Scoring Matrix');
+        lines.push('');
+        lines.push('| Criterion | Raw Score | Normalized (0-100) | Weight | Basis | Score Rationale |');
+        lines.push('|---|---|---|---|---|---|');
+        (opp.scores || []).forEach((c: any) => {
+          lines.push(`| ${c.criterion.replace(/_/g, ' ')} | ${c.rawScore} | ${Math.round(c.normalizedScore)}% | ${c.basis} | ${c.rationale} |`);
+        });
+        lines.push('');
+        lines.push('#### Weight Sensitivity Scenarios');
+        lines.push('');
+        lines.push('| Preset Strategy | Weight Focus | Calculated Composite Score |');
+        lines.push('|---|---|---|');
+        opp.sensitivityScenarios.forEach((s: any) => {
+          lines.push(`| ${s.name} | ${s.description} | **${s.score.toFixed(1)} / 100** |`);
+        });
+        lines.push('');
+        if (opp.linkedEvidence && opp.linkedEvidence.length > 0) {
+          lines.push('#### Grounding Evidence Lineage');
+          lines.push('');
+          opp.linkedEvidence.forEach((e: any) => {
+            lines.push(`- "${e.originalText}" _(${e.platform} · Stage: ${e.journeyStage} · Provenance: ${e.provenance})_`);
+          });
+          lines.push('');
+        }
+        if (opp.missingInformation && opp.missingInformation.length > 0) {
+          lines.push('#### Crucial Telemetry Gaps & Caveats');
+          lines.push('');
+          opp.missingInformation.forEach((gap: string) => {
+            lines.push(`- ⚠️ ${gap}`);
+          });
+          lines.push('');
+        }
+      });
+    } else {
+      lines.push('_No candidate opportunities generated yet._');
+      lines.push('');
+    }
+
+    // Open Research Questions & Data Gaps
+    lines.push('## 6. Open Research Questions & Investigation Gaps');
+    lines.push('');
+    if (data.openResearchQuestions.length > 0) {
+      data.openResearchQuestions.forEach((q) => {
+        lines.push(`- **[${q.status.toUpperCase()}]** ${q.question} _(Origin: ${q.origin})_`);
+      });
+    } else {
+      lines.push('_No open research questions recorded yet._');
+    }
+    lines.push('');
+
+    // Known Limitations
+    lines.push('## 7. Known Technical & Data Limitations');
+    lines.push('');
+    data.knownLimitations.forEach((lim) => {
+      lines.push(`- **${lim.split(':')[0]}**: ${lim.split(':').slice(1).join(':').trim()}`);
+    });
+    lines.push('');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Generates sanitized CSV log
+   */
+  static async generateCsvLog(): Promise<string> {
+    return EvidenceService.exportToCsv({ excludeSynthetic: false });
+  }
+}
+

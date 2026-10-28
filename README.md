@@ -1,34 +1,116 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Groww SIP Discovery AI Engine 🚀
 
-## Getting Started
+An AI-powered Natural Language Discovery Engine that analyzes public investor feedback to uncover the root causes of first-time mutual fund investor attrition 12 months after SIP initiation on Groww.
 
-First, run the development server:
+Built on an **evidence-first problem space formulation** framework, this engine ingests unfiltered customer reviews, maps investor friction across journey stages, verifies AI classifications via Human-in-the-Loop (HITL) workflows, models causal dynamics via interactive force-directed graphs, and prioritizes high-leverage product interventions.
 
+---
+
+## 🎯 Primary Business Objective
+> **Fellowship Metric:** Increase the percentage of first-time mutual fund investors who maintain an **Active SIP** (≥1 successful instalment in the past 30 days) at month 12 after inception.
+
+---
+
+## ✨ Key Features
+
+- **Multi-Source Evidence Ingestion & Provenance:**
+  - Ingests and parses real feedback from Google Play Store, Apple App Store, Reddit (`r/IndiaInvestments`), X/Twitter, and SEBI SCORES complaints.
+  - Computes cryptographic SHA-256 content hashes to prevent duplicates.
+  - Distinguishes between real investor feedback and verified synthetic benchmark data.
+
+- **AI Extraction Engine (Gemini 2.5 Flash + Deterministic Fallback):**
+  - Classifies evidence into granular **Journey Stages** (*Discovery & Intent*, *Mandate & KYC Setup*, *First Instalment Allotment*, *Market Dip Reaction*, *Autopay Failure & Recovery*, *Continuation Milestone*, *Pause & Cancellation*).
+  - Extracts emotional valence, operational failure mechanisms, friction themes, and user quote verification.
+
+- **Human-in-the-Loop (HITL) Validation & Reliability:**
+  - Review interface for product managers and analysts to **Confirm**, **Correct**, or **Reject** AI classifications.
+  - Calculates inter-rater agreement rates, tracks disagreement distribution, and flags drift against a golden benchmark test suite.
+
+- **Interactive Causal Force-Directed Graph:**
+  - D3-powered force graph modeling relationships between Journey Stages, Friction Themes, Root Failure Mechanisms, and the 12-Month Active SIP metric.
+  - Interactive stage filters, drag-and-drop nodes, and live inspection drawer.
+
+- **Opportunity Scoring & PRD Export:**
+  - ICE (Impact, Confidence, Ease) prioritization matrix for candidate solutions.
+  - Auto-generates structured, evidence-backed Product Requirement Documents (PRDs) with direct investor quote citations.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework:** Next.js 16 (Turbopack, App Router, React 19)
+- **Language:** TypeScript
+- **Database:** SQLite / LibSQL with [Drizzle ORM](https://orm.drizzle.team)
+- **AI / LLM:** Google Gen AI SDK (`@google/genai` / Gemini 2.5 Flash)
+- **Visualizations:** D3 Force (`d3-force`)
+- **Testing:** Vitest
+- **Styling:** Custom modern dark-mode fintech design system
+
+---
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+- Node.js 18+ or 20+
+- npm, pnpm, or yarn
+
+### 2. Installation
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Clone the repository
+git clone https://github.com/shubhamnaik25081999-gif/groww_sip_discovery_AI_engine.git
+cd groww_sip_discovery_AI_engine
+
+# Install dependencies
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Environment Variables (Optional)
+Create a `.env.local` file in the root directory:
+```env
+# Gemini API Key (optional - system uses deterministic offline fallback if not provided)
+GEMINI_API_KEY=your_gemini_api_key_here
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Push Database Schema
+```bash
+npm run db:push
+```
 
-## Learn More
+### 5. Run Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-To learn more about Next.js, take a look at the following resources:
+### 6. Run Test Suite
+```bash
+npm test
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 📂 Project Structure
 
-## Deploy on Vercel
+```
+groww-sip-lab/
+├── src/
+│   ├── app/                 # Next.js App Router (Pages, Layout, Server Actions)
+│   │   ├── evidence/        # Evidence table, filtering, ingestion modal
+│   │   ├── graph/           # D3 causal graph visualization
+│   │   ├── opportunities/   # Opportunity prioritization matrix
+│   │   ├── reliability/     # AI reliability metrics & evaluation
+│   │   ├── themes/          # Thematic analysis breakdown
+│   │   └── tracker/         # Fellowship 8-week hypothesis tracker
+│   ├── components/          # Reusable UI components & modals
+│   ├── db/                  # Drizzle database schema & SQLite client
+│   ├── lib/                 # Types, CSV parser, cryptographic hashing
+│   └── services/            # Ingestion, AI analysis, evaluations, exports
+├── drizzle.config.ts        # Drizzle ORM config
+├── vitest.config.ts         # Vitest test runner config
+└── package.json
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 📄 License
+This project is developed for the Groww Product Fellowship.
