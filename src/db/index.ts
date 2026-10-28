@@ -2,10 +2,24 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { createClient } from '@libsql/client';
 import * as schema from './schema';
 
-const dbUrl = process.env.DATABASE_URL || 'file:groww_sip_lab.db';
+function getDatabaseConfig() {
+  const isVercel = process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
+  let url = process.env.DATABASE_URL;
+
+  if (!url) {
+    url = isVercel ? 'file:/tmp/groww_sip_lab.db' : 'file:groww_sip_lab.db';
+  }
+
+  const authToken = process.env.DATABASE_AUTH_TOKEN || process.env.TURSO_AUTH_TOKEN;
+
+  return { url, authToken };
+}
+
+const config = getDatabaseConfig();
 
 export const client = createClient({
-  url: dbUrl,
+  url: config.url,
+  authToken: config.authToken,
 });
 
 export const db = drizzle(client, { schema });
