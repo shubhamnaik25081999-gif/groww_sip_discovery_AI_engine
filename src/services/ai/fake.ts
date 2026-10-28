@@ -4,8 +4,8 @@ import { JourneyStage } from '@/lib/types';
 
 export class FakeAIProvider implements AIProvider {
   readonly providerName = 'fake';
-  readonly modelName = 'fake-rule-engine';
-  readonly modelVersion = '1.0.0-test';
+  readonly modelName = 'simulated-rule-engine-test-double';
+  readonly modelVersion = '1.0.0-simulated-test';
   readonly promptVersion = '2026-10-discovery-v1';
   readonly schemaVersion = '1.0.0';
 

@@ -6,6 +6,7 @@ import {
   recordAnalyses,
   evidenceRecords,
   themes,
+  analysisRuns,
 } from '@/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import crypto from 'crypto';
@@ -337,10 +338,34 @@ export class EvaluationService {
       confusionMatrix.push({ actual, predicted, count });
     }
 
+    // Fetch run metadata to separate real AI models from simulated test doubles
+    const runRecords = await db
+      .select()
+      .from(analysisRuns)
+      .where(eq(analysisRuns.id, analysisRunId))
+      .limit(1);
+
+    const runInfo = runRecords.length > 0 ? runRecords[0] : null;
+    const provider = runInfo?.provider || 'unknown';
+    const model = runInfo?.model || 'unknown';
+    const modelVersion = runInfo?.modelVersion || 'unknown';
+    const isSimulated = provider === 'fake';
+    const missingGoldens = Math.max(0, goldens.length - evaluatedCount);
+    const isIncomplete = missingGoldens > 0;
+    const missingDetails = isIncomplete
+      ? `${missingGoldens} golden records were not analyzed in this run (${evaluatedCount}/${goldens.length} evaluated)`
+      : null;
+
     // Save evaluation run
     await db.insert(evaluationRuns).values({
       id: evalRunId,
       analysisRunId,
+      provider,
+      model,
+      modelVersion,
+      isSimulated,
+      isIncomplete,
+      missingDetails,
       totalGoldenRecords: evaluatedCount,
       exactMatches,
       accuracy,
@@ -359,6 +384,12 @@ export class EvaluationService {
     return {
       evalRunId,
       analysisRunId,
+      provider,
+      model,
+      modelVersion,
+      isSimulated,
+      isIncomplete,
+      missingDetails,
       totalGoldenRecords: evaluatedCount,
       exactMatches,
       accuracy,
@@ -367,8 +398,9 @@ export class EvaluationService {
       abstentionAccuracy,
       errorCategoryCounts,
       smallSampleWarning: evaluatedCount < 50,
-      warningMessage:
-        'Small Golden Set Diagnostic (n < 50): Metrics provide an initial diagnostic of failure modes and classification alignment, not mathematical proof of broad model generalization.',
+      warningMessage: isSimulated
+        ? 'SIMULATED TEST BENCHMARK: Evaluated using FakeAIProvider rule engine. This measures deterministic unit test assertion coverage, NOT real-world Gemini AI model accuracy.'
+        : 'Empirical model accuracy evaluated against blind human-curated golden benchmark set.',
     };
   }
 
@@ -385,6 +417,26 @@ export class EvaluationService {
 
     if (runs.length === 0) return null;
     const run = runs[0];
+
+    // Fallback if provider was not recorded in legacy rows
+    let provider = run.provider;
+    let model = run.model;
+    let modelVersion = run.modelVersion;
+    let isSimulated = Boolean(run.isSimulated);
+
+    if (!provider) {
+      const parentRun = await db
+        .select()
+        .from(analysisRuns)
+        .where(eq(analysisRuns.id, run.analysisRunId))
+        .limit(1);
+      if (parentRun.length > 0) {
+        provider = parentRun[0].provider;
+        model = parentRun[0].model;
+        modelVersion = parentRun[0].modelVersion;
+        isSimulated = provider === 'fake';
+      }
+    }
 
     const items = await db
       .select({
@@ -405,6 +457,12 @@ export class EvaluationService {
 
     return {
       ...run,
+      provider: provider || 'unknown',
+      model: model || 'unknown',
+      modelVersion: modelVersion || 'unknown',
+      isSimulated,
+      isIncomplete: Boolean(run.isIncomplete),
+      missingDetails: run.missingDetails || null,
       metricsByTheme: JSON.parse(run.metricsByTheme) as ThemeMetric[],
       confusionMatrix: JSON.parse(run.confusionMatrix) as ConfusionMatrixCell[],
       commonErrorCategories: JSON.parse(run.commonErrorCategories) as Record<string, number>,

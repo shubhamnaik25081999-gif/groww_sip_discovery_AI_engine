@@ -179,15 +179,25 @@ export class OpportunityService {
       .where(inArray(evidenceRecords.id, evidenceIds))
       .all();
 
-    // 3. COLLAPSE DUPLICATES: Group by normalized contentHash
-    const distinctIndependentMap = new Map<string, typeof records[0]>();
+    // 3. COLLAPSE DUPLICATES: Group by canonical root (duplicateOfId) and contentHash
+    // Duplicate records must not inflate independent evidence counts.
+    const seenHashes = new Set<string>();
+    const seenCanonicalIds = new Set<string>();
+    const independentRecords: typeof records = [];
+
     for (const record of records) {
-      const dedupeKey = record.contentHash;
-      if (!distinctIndependentMap.has(dedupeKey)) {
-        distinctIndependentMap.set(dedupeKey, record);
+      const canonicalId = record.duplicateOfId || record.id;
+      if (seenCanonicalIds.has(canonicalId) || seenCanonicalIds.has(record.id)) {
+        continue;
       }
+      if (seenHashes.has(record.contentHash)) {
+        continue;
+      }
+      seenHashes.add(record.contentHash);
+      seenCanonicalIds.add(canonicalId);
+      seenCanonicalIds.add(record.id);
+      independentRecords.push(record);
     }
-    const independentRecords = Array.from(distinctIndependentMap.values());
     const independentRecordCount = independentRecords.length;
 
     // 4. Source Diversity (distinct platforms among independent records)
@@ -196,7 +206,7 @@ export class OpportunityService {
     // Normalize source diversity: 1 platform = 20%, 2 = 50%, 3 = 80%, >=4 = 100%
     const normalizedDiversity = Math.min(100, sourceDiversityCount * 25);
 
-    // 5. Evidence Strength: Proportion of independent records with verified URL + human-confirmed review
+    // 5. Evidence Strength: Proportion of independent records with verified source + human-confirmed review
     const allReviews = await db
       .select()
       .from(reviews)
@@ -208,26 +218,31 @@ export class OpportunityService {
     );
 
     let weightedEvidencePoints = 0;
-    let liveVerifiedCount = 0;
-    let curatedBenchmarkCount = 0;
+    let contentVerifiedCount = 0;
+    let linkCheckedCount = 0;
+    let syntheticFixtureCount = 0;
     let userEnteredCount = 0;
+    let unverifiedCount = 0;
 
     for (const r of independentRecords) {
       const prov = JSON.parse(r.fieldProvenance || '{}');
       const isConfirmed = confirmedEvidenceIds.has(r.id);
-      const urlStatus = prov.sourceUrl;
+      const status = r.verificationStatus || prov.sourceUrl || 'unverified';
 
-      if (urlStatus === 'verified_live' || urlStatus === 'verified') {
-        liveVerifiedCount++;
-        weightedEvidencePoints += isConfirmed ? 1.0 : 0.7;
-      } else if (urlStatus === 'curated_benchmark') {
-        curatedBenchmarkCount++;
-        // Benchmark fixture: authentic qualitative research excerpt, unverified live permalink
-        weightedEvidencePoints += isConfirmed ? 0.8 : 0.5;
-      } else if (urlStatus === 'user_entered') {
+      if (status === 'content_verified' || status === 'verified_live' || status === 'verified') {
+        contentVerifiedCount++;
+        weightedEvidencePoints += isConfirmed ? 1.0 : 0.8;
+      } else if (status === 'link_checked') {
+        linkCheckedCount++;
+        weightedEvidencePoints += isConfirmed ? 0.8 : 0.6;
+      } else if (status === 'synthetic_fixture' || status === 'curated_benchmark' || r.isSynthetic) {
+        syntheticFixtureCount++;
+        weightedEvidencePoints += isConfirmed ? 0.6 : 0.4;
+      } else if (status === 'user_entered') {
         userEnteredCount++;
-        weightedEvidencePoints += isConfirmed ? 0.5 : 0.3;
+        weightedEvidencePoints += isConfirmed ? 0.4 : 0.2;
       } else {
+        unverifiedCount++;
         weightedEvidencePoints += isConfirmed ? 0.2 : 0.0;
       }
     }
@@ -262,7 +277,7 @@ export class OpportunityService {
         rawScore: Number((evidenceStrengthRatio * 5).toFixed(1)),
         normalizedScore: Number(normalizedEvidenceStrength.toFixed(1)),
         basis: 'computed',
-        rationale: `Computed across ${independentRecordCount} non-duplicate records: ${liveVerifiedCount} live-verified, ${curatedBenchmarkCount} curated benchmark fixtures, ${userEnteredCount} user-entered. Human confirmation rate: ${confirmedEvidenceIds.size}/${independentRecordCount}. Provenance-weighted strength: ${normalizedEvidenceStrength}%.`,
+        rationale: `Computed across ${independentRecordCount} independent non-duplicate records: ${contentVerifiedCount} content-verified, ${linkCheckedCount} link-checked, ${syntheticFixtureCount} synthetic/benchmark fixtures, ${userEnteredCount} user-entered, ${unverifiedCount} unverified. Human confirmation rate: ${confirmedEvidenceIds.size}/${independentRecordCount}. Provenance-weighted strength: ${normalizedEvidenceStrength}%.`,
         scoredBy: 'System Engine',
       },
       {
@@ -270,7 +285,7 @@ export class OpportunityService {
         rawScore: Math.min(5, Number((independentRecordCount / 2).toFixed(1))),
         normalizedScore: Number(normalizedRecordsScore.toFixed(1)),
         basis: 'computed',
-        rationale: `Derived from ${independentRecordCount} distinct non-duplicate records (duplicates collapsed by content hash).`,
+        rationale: `Derived from ${independentRecordCount} distinct non-duplicate records (duplicates collapsed by content hash and canonical duplicateOfId).`,
         scoredBy: 'System Engine',
       },
       {
@@ -396,6 +411,9 @@ export class OpportunityService {
           sourceUrl: r!.sourceUrl,
           platform: r!.platform,
           journeyStage: r!.journeyStage,
+          verificationStatus: r!.verificationStatus,
+          isSynthetic: r!.isSynthetic,
+          duplicateOfId: r!.duplicateOfId,
           provenance: JSON.parse(r!.fieldProvenance || '{}'),
         }));
 
@@ -499,6 +517,7 @@ export class OpportunityService {
 
       // Missing information & methodological caveats
       const missingInformation = [
+        'Opportunity conclusions are testable hypotheses on 12-month retention, NOT proven causes of SIP churn.',
         'Backend bank ledger transaction drop-off logs are missing; signal is derived from qualitative app reviews and community threads.',
         'Public complaint frequency cannot be equated with cohort churn prevalence (vocal minority bias).',
         'Hypothesis on 12-month retention requires primary quantitative validation via a randomized controlled trial (A/B test).',

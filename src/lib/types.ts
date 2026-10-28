@@ -43,6 +43,15 @@ export interface FieldProvenanceMap {
   sourceMetadata?: FieldProvenanceStatus;
 }
 
+export const VerificationStatusSchema = z.enum([
+  'content_verified',   // Human or scraper has verified original content and source authenticity
+  'link_checked',       // Link reachable and syntax valid, but content not fully authenticated
+  'user_entered',       // User submitted, pending review
+  'unverified',         // Explicitly unverified or uncheckable
+  'synthetic_fixture',  // Synthetic test data or illustrative fixture
+]);
+export type VerificationStatus = z.infer<typeof VerificationStatusSchema>;
+
 export const EvidenceRecordInputSchema = z.object({
   sourceUrl: z.string().url('Source URL must be a valid HTTP or HTTPS URL').refine(
     (url) => url.startsWith('http://') || url.startsWith('https://'),
@@ -52,14 +61,17 @@ export const EvidenceRecordInputSchema = z.object({
   collectedAt: z.string().min(1, 'Collection date is required'),
   originalText: z.string().trim().min(5, 'Original verbatim text must be at least 5 characters'),
   investorContext: z.string().optional().nullable(),
-  journeyStage: JourneyStageSchema.default('unclear'),
+  journeyStage: JourneyStageSchema.optional().default('unclear'),
   sourceMetadata: z.record(z.string(), z.any()).optional().nullable(),
   fieldProvenance: z.record(z.string(), FieldProvenanceStatusSchema).optional(),
-  entryMethod: z.enum(['csv', 'manual', 'fixture']).default('manual'),
-  isSynthetic: z.boolean().default(false),
+  entryMethod: z.enum(['csv', 'manual', 'fixture']).optional().default('manual'),
+  isSynthetic: z.boolean().optional().default(false),
+  verificationStatus: VerificationStatusSchema.optional().default('unverified'),
+  verifiedAt: z.string().optional().nullable(),
+  verifiedBy: z.string().optional().nullable(),
 });
 
-export type EvidenceRecordInput = z.infer<typeof EvidenceRecordInputSchema>;
+export type EvidenceRecordInput = z.input<typeof EvidenceRecordInputSchema>;
 
 export interface IngestRowError {
   rowNumber: number;

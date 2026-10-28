@@ -28,6 +28,9 @@ export async function initializeDatabase() {
       import_batch_id TEXT,
       duplicate_of_id TEXT,
       is_synthetic INTEGER NOT NULL DEFAULT 0,
+      verification_status TEXT NOT NULL DEFAULT 'unverified',
+      verified_at TEXT,
+      verified_by TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -139,6 +142,12 @@ export async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS evaluation_runs (
       id TEXT PRIMARY KEY,
       analysis_run_id TEXT NOT NULL REFERENCES analysis_runs(id),
+      provider TEXT,
+      model TEXT,
+      model_version TEXT,
+      is_simulated INTEGER NOT NULL DEFAULT 0,
+      is_incomplete INTEGER NOT NULL DEFAULT 0,
+      missing_details TEXT,
       evaluated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       total_golden_records INTEGER NOT NULL,
       exact_matches INTEGER NOT NULL,
@@ -238,4 +247,25 @@ export async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_record_analyses_evidence ON record_analyses(evidence_id);
     CREATE INDEX IF NOT EXISTS idx_reviews_record_analysis ON reviews(record_analysis_id);
   `);
+
+  // Migrate existing tables if columns are missing
+  const alterStatements = [
+    'ALTER TABLE evidence_records ADD COLUMN verification_status TEXT NOT NULL DEFAULT "unverified"',
+    'ALTER TABLE evidence_records ADD COLUMN verified_at TEXT',
+    'ALTER TABLE evidence_records ADD COLUMN verified_by TEXT',
+    'ALTER TABLE evaluation_runs ADD COLUMN provider TEXT',
+    'ALTER TABLE evaluation_runs ADD COLUMN model TEXT',
+    'ALTER TABLE evaluation_runs ADD COLUMN model_version TEXT',
+    'ALTER TABLE evaluation_runs ADD COLUMN is_simulated INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE evaluation_runs ADD COLUMN is_incomplete INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE evaluation_runs ADD COLUMN missing_details TEXT',
+  ];
+
+  for (const stmt of alterStatements) {
+    try {
+      await client.execute(stmt);
+    } catch {
+      // Column already exists or table not yet created
+    }
+  }
 }

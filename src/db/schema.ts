@@ -17,6 +17,9 @@ export const evidenceRecords = sqliteTable('evidence_records', {
   importBatchId: text('import_batch_id'),
   duplicateOfId: text('duplicate_of_id'),
   isSynthetic: integer('is_synthetic', { mode: 'boolean' }).notNull().default(false), // Watermark for synthetic tests
+  verificationStatus: text('verification_status').notNull().default('unverified'), // 'content_verified' | 'link_checked' | 'user_entered' | 'unverified' | 'synthetic_fixture'
+  verifiedAt: text('verified_at'),
+  verifiedBy: text('verified_by'),
   createdAt: text('created_at').notNull().default(sql`(CURRENT_TIMESTAMP)`),
   updatedAt: text('updated_at').notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
@@ -137,6 +140,12 @@ export const goldenLabels = sqliteTable('golden_labels', {
 export const evaluationRuns = sqliteTable('evaluation_runs', {
   id: text('id').primaryKey(),
   analysisRunId: text('analysis_run_id').notNull().references(() => analysisRuns.id),
+  provider: text('provider'), // 'gemini' | 'fake'
+  model: text('model'),
+  modelVersion: text('model_version'),
+  isSimulated: integer('is_simulated', { mode: 'boolean' }).notNull().default(false),
+  isIncomplete: integer('is_incomplete', { mode: 'boolean' }).notNull().default(false),
+  missingDetails: text('missing_details'), // JSON string: { missingPredictions: number, missingGoldens: number }
   evaluatedAt: text('evaluated_at').notNull().default(sql`(CURRENT_TIMESTAMP)`),
   totalGoldenRecords: integer('total_golden_records').notNull(),
   exactMatches: integer('exact_matches').notNull(),

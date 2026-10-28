@@ -1,7 +1,12 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { submitReviewAction, updateEvidenceMetadataAction, runBatchAnalysisAction } from '@/app/actions';
+import {
+  submitReviewAction,
+  updateEvidenceMetadataAction,
+  runBatchAnalysisAction,
+  verifyEvidenceAction,
+} from '@/app/actions';
 
 export function EvidenceDetailModal({
   record,
@@ -14,6 +19,13 @@ export function EvidenceDetailModal({
   const [isPending, startTransition] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Verification state
+  const [verificationStatus, setVerificationStatus] = useState<string>(
+    record.verificationStatus || (record.isSynthetic ? 'synthetic_fixture' : 'unverified')
+  );
+  const [verifiedAt, setVerifiedAt] = useState<string | null>(record.verifiedAt || null);
+  const [verifiedBy, setVerifiedBy] = useState<string | null>(record.verifiedBy || null);
 
   // Review Form state
   const [decision, setDecision] = useState<'confirmed' | 'corrected' | 'rejected'>('confirmed');
@@ -118,6 +130,27 @@ export function EvidenceDetailModal({
     });
   };
 
+  const handleVerifyEvidence = (status: 'content_verified' | 'link_checked' | 'unverified') => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    startTransition(async () => {
+      const res = await verifyEvidenceAction(
+        record.id,
+        status,
+        reviewer,
+        `Provenance audit status marked as ${status}`
+      );
+      if (res.success) {
+        setVerificationStatus(status);
+        setVerifiedAt(new Date().toISOString());
+        setVerifiedBy(reviewer);
+        setSuccessMsg(`Evidence status successfully updated to "${status}".`);
+      } else {
+        setErrorMsg(res.error || 'Failed to update verification status.');
+      }
+    });
+  };
+
   const parsedAi = record.latestAnalysis?.parsedOutput;
   const latestRev = record.latestReview;
 
@@ -212,7 +245,7 @@ export function EvidenceDetailModal({
             {/* Provenance breakdown */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', background: 'var(--bg-canvas)', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source Provenance</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source Provenance &amp; Verification</div>
                 <a
                   href={record.sourceUrl}
                   target="_blank"
@@ -221,8 +254,63 @@ export function EvidenceDetailModal({
                 >
                   {record.sourceUrl} ↗
                 </a>
-                <div style={{ fontSize: '10px', color: 'var(--emerald-400)', marginTop: '2px' }}>
-                  ✓ Verified URL Source
+                <div style={{ marginTop: '4px' }}>
+                  {verificationStatus === 'content_verified' ? (
+                    <span className="badge badge-emerald" style={{ fontSize: '10px' }}>
+                      ● Content Verified
+                    </span>
+                  ) : verificationStatus === 'link_checked' ? (
+                    <span className="badge badge-blue" style={{ fontSize: '10px' }}>
+                      ● Link Checked
+                    </span>
+                  ) : verificationStatus === 'synthetic_fixture' || record.isSynthetic ? (
+                    <span className="badge badge-amber" style={{ fontSize: '10px' }}>
+                      ◆ Synthetic Benchmark Fixture
+                    </span>
+                  ) : verificationStatus === 'user_entered' ? (
+                    <span className="badge badge-purple" style={{ fontSize: '10px' }}>
+                      ▲ User-Entered Submission
+                    </span>
+                  ) : (
+                    <span className="badge badge-zinc" style={{ fontSize: '10px' }}>
+                      ○ Unverified Link
+                    </span>
+                  )}
+                </div>
+                {verifiedAt && (
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Audited by {verifiedBy || 'Reviewer'} on {new Date(verifiedAt).toLocaleDateString()}
+                  </div>
+                )}
+                {/* Audit Controls */}
+                <div style={{ marginTop: '8px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '10px', padding: '2px 6px', color: 'var(--emerald-400)' }}
+                    disabled={isPending}
+                    onClick={() => handleVerifyEvidence('content_verified')}
+                  >
+                    ✓ Verify Content
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '10px', padding: '2px 6px', color: 'var(--blue-400)' }}
+                    disabled={isPending}
+                    onClick={() => handleVerifyEvidence('link_checked')}
+                  >
+                    🌐 Check Link
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '10px', padding: '2px 6px' }}
+                    disabled={isPending}
+                    onClick={() => handleVerifyEvidence('unverified')}
+                  >
+                    Unverify
+                  </button>
                 </div>
               </div>
 
@@ -232,13 +320,16 @@ export function EvidenceDetailModal({
                   {record.investorContext || 'Not explicitly stated in source'}
                 </div>
                 <div style={{ fontSize: '10px', color: 'var(--amber-400)', marginTop: '2px' }}>
-                  {record.investorContext ? '⚠️ User/AI Entered' : 'Unverified (Preserved)'}
+                  {record.investorContext ? '⚠️ Context Annotation' : 'Unverified (Preserved)'}
                 </div>
               </div>
 
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Collection Timestamp</div>
                 <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{record.collectedAt}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  Entry Method: <code>{record.entryMethod || 'seed'}</code>
+                </div>
               </div>
             </div>
 

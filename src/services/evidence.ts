@@ -84,6 +84,9 @@ export class EvidenceService {
         importBatchId: batchId,
         duplicateOfId,
         isSynthetic: Boolean(input.isSynthetic),
+        verificationStatus: Boolean(input.isSynthetic) ? 'synthetic_fixture' : 'user_entered',
+        verifiedAt: null,
+        verifiedBy: null,
       });
 
       acceptedRows++;
@@ -143,6 +146,13 @@ export class EvidenceService {
       journeyStage: input.journeyStage !== 'unclear' ? 'user_entered' : 'unverified',
     };
 
+    let verificationStatus: 'content_verified' | 'link_checked' | 'user_entered' | 'unverified' | 'synthetic_fixture' = 'user_entered';
+    if (input.isSynthetic || input.verificationStatus === 'synthetic_fixture') {
+      verificationStatus = 'synthetic_fixture';
+    } else if (input.verificationStatus) {
+      verificationStatus = input.verificationStatus;
+    }
+
     await db.insert(evidenceRecords).values({
       id: recordId,
       sourceUrl: input.sourceUrl,
@@ -156,10 +166,49 @@ export class EvidenceService {
       fieldProvenance: JSON.stringify(input.fieldProvenance || defaultProvenance),
       entryMethod: input.entryMethod || 'manual',
       duplicateOfId,
-      isSynthetic: Boolean(input.isSynthetic),
+      isSynthetic: Boolean(input.isSynthetic || verificationStatus === 'synthetic_fixture'),
+      verificationStatus,
+      verifiedAt: input.verifiedAt || null,
+      verifiedBy: input.verifiedBy || null,
     });
 
     return { id: recordId, isDuplicate, duplicateOfId };
+  }
+
+  /**
+   * Updates verification status with reviewer audit trail
+   */
+  static async verifyEvidenceRecord(
+    id: string,
+    status: 'content_verified' | 'link_checked' | 'unverified',
+    verifiedBy: string,
+    notes?: string
+  ): Promise<void> {
+    await initializeDatabase();
+    const records = await db.select().from(evidenceRecords).where(eq(evidenceRecords.id, id)).limit(1);
+    if (records.length === 0) {
+      throw new Error(`Record with id ${id} not found.`);
+    }
+
+    const current = records[0];
+    const timestamp = new Date().toISOString();
+
+    await db.insert(evidenceEdits).values({
+      id: crypto.randomUUID(),
+      evidenceId: id,
+      fieldName: 'verification_status',
+      oldValue: current.verificationStatus,
+      newValue: status,
+      editedBy: verifiedBy,
+      reason: notes || `Updated verification status to ${status}`,
+    });
+
+    await db.update(evidenceRecords).set({
+      verificationStatus: status,
+      verifiedAt: timestamp,
+      verifiedBy,
+      updatedAt: timestamp,
+    }).where(eq(evidenceRecords.id, id));
   }
 
   /**
@@ -404,6 +453,9 @@ export class EvidenceService {
       'source_url',
       'platform',
       'collected_at',
+      'verification_status',
+      'verified_at',
+      'verified_by',
       'journey_stage',
       'investor_context',
       'original_text',
@@ -425,6 +477,9 @@ export class EvidenceService {
         sanitizeForCsvExport(r.sourceUrl),
         sanitizeForCsvExport(r.platform),
         sanitizeForCsvExport(r.collectedAt),
+        sanitizeForCsvExport(r.verificationStatus || 'unverified'),
+        sanitizeForCsvExport(r.verifiedAt || ''),
+        sanitizeForCsvExport(r.verifiedBy || ''),
         sanitizeForCsvExport(r.journeyStage),
         sanitizeForCsvExport(r.investorContext || ''),
         sanitizeForCsvExport(r.originalText),
@@ -452,36 +507,55 @@ export class EvidenceService {
   static async getProvenanceBreakdown() {
     await initializeDatabase();
     const records = await db.select().from(evidenceRecords).all();
-    let verifiedLive = 0;
+    let contentVerified = 0;
+    let linkChecked = 0;
     let curatedBenchmark = 0;
     let userEntered = 0;
     let unverified = 0;
 
     for (const r of records) {
-      try {
-        const prov: FieldProvenanceMap = JSON.parse(r.fieldProvenance || '{}');
-        const status = prov.sourceUrl;
-        if (status === 'verified_live' || status === 'verified') {
-          verifiedLive++;
-        } else if (status === 'curated_benchmark') {
-          curatedBenchmark++;
-        } else if (status === 'user_entered') {
-          userEntered++;
-        } else {
+      const vStatus = r.verificationStatus;
+      const isSynth = Boolean(r.isSynthetic);
+
+      if (isSynth || vStatus === 'synthetic_fixture') {
+        curatedBenchmark++;
+      } else if (vStatus === 'content_verified') {
+        contentVerified++;
+      } else if (vStatus === 'link_checked') {
+        linkChecked++;
+      } else if (vStatus === 'user_entered') {
+        userEntered++;
+      } else {
+        // Check legacy fieldProvenance if present
+        try {
+          const prov: FieldProvenanceMap = JSON.parse(r.fieldProvenance || '{}');
+          if (prov.sourceUrl === 'verified_live' || prov.sourceUrl === 'verified') {
+            contentVerified++;
+          } else if (prov.sourceUrl === 'curated_benchmark') {
+            curatedBenchmark++;
+          } else if (prov.sourceUrl === 'user_entered') {
+            userEntered++;
+          } else {
+            unverified++;
+          }
+        } catch {
           unverified++;
         }
-      } catch {
-        unverified++;
       }
     }
 
+    const verifiedLive = contentVerified + linkChecked;
+
     return {
       total: records.length,
+      contentVerified,
+      linkChecked,
       verifiedLive,
       curatedBenchmark,
       userEntered,
       unverified,
-      isBenchmarkCohort: curatedBenchmark > 0 && verifiedLive === 0,
+      syntheticFixture: curatedBenchmark,
+      isBenchmarkCohort: curatedBenchmark > 0 && verifiedLive === 0 && userEntered === 0,
     };
   }
 }

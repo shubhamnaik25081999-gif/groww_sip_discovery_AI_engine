@@ -33,10 +33,13 @@ export interface EvidenceLogExportData {
     dateRange: string;
     duplicateCount: number;
     provenanceBreakdown: {
+      contentVerified: number;
+      linkChecked: number;
       verifiedLive: number;
       curatedBenchmark: number;
       userEntered: number;
       unverified: number;
+      syntheticFixture: number;
     };
     analysisRunsCount: number;
     totalGoldenLabels: number;
@@ -157,9 +160,11 @@ export class ExportService {
     lines.push('');
     lines.push('| Provenance Tier | Count | Description |');
     lines.push('|---|---|---|');
-    lines.push(`| **Curated Benchmark (Academic Fixture)** | ${data.summary.provenanceBreakdown.curatedBenchmark} | Authentic investor feedback excerpt curated from public discourse; URL permalink is an academic fixture. |`);
-    lines.push(`| **Live Verified** | ${data.summary.provenanceBreakdown.verifiedLive} | Real-time verified live URL with accessible source page. |`);
-    lines.push(`| **User-Entered** | ${data.summary.provenanceBreakdown.userEntered} | Ingested via manual entry or CSV upload; awaiting verification audit. |`);
+    lines.push(`| **Content Verified** | ${data.summary.provenanceBreakdown.contentVerified} | Original quote and source context verified against primary public record. |`);
+    lines.push(`| **Link Checked** | ${data.summary.provenanceBreakdown.linkChecked} | Source URL verified reachable via live HTTP check. |`);
+    lines.push(`| **Curated Benchmark (Academic Fixture)** | ${data.summary.provenanceBreakdown.curatedBenchmark} | Benchmark fixture preserved for development & testing; not verified live. |`);
+    lines.push(`| **Synthetic Fixture** | ${data.summary.provenanceBreakdown.syntheticFixture} | Synthetic/illustrative example generated for regression tests. |`);
+    lines.push(`| **User-Entered** | ${data.summary.provenanceBreakdown.userEntered} | Ingested via user manual entry or CSV upload; awaiting verification audit. |`);
     lines.push(`| **Unverified** | ${data.summary.provenanceBreakdown.unverified} | Raw record with unverified source link. |`);
     lines.push('');
 
@@ -184,6 +189,20 @@ export class ExportService {
     lines.push('## 3. Golden-Set Diagnostic Evaluation');
     lines.push('');
     if (data.latestEvaluation) {
+      if (data.latestEvaluation.isSimulated || data.latestEvaluation.provider === 'fake') {
+        lines.push('> [!WARNING]');
+        lines.push('> **SIMULATED TEST BENCHMARK**: Evaluated using FakeAIProvider rule engine test double. This reflects deterministic software test assertions, NOT real-world Gemini AI model accuracy.');
+        lines.push('');
+      }
+      if (data.latestEvaluation.isIncomplete) {
+        lines.push('> [!CAUTION]');
+        lines.push(`> **INCOMPLETE EVALUATION**: ${data.latestEvaluation.missingDetails || 'Evaluation is missing independent labels or eligible predictions.'}`);
+        lines.push('');
+      }
+      lines.push(`- **Evaluation Provider**: \`${data.latestEvaluation.provider || 'unknown'}\``);
+      lines.push(`- **Model / Version**: \`${data.latestEvaluation.model || 'unknown'}\` (\`${data.latestEvaluation.modelVersion || 'unknown'}\`)`);
+      lines.push(`- **Evaluation Date**: ${data.latestEvaluation.evaluatedAt || 'unknown'}`);
+      lines.push(`- **Golden-Set Size**: ${data.latestEvaluation.totalGoldenRecords} records`);
       lines.push(`> [!NOTE]`);
       lines.push(`> **Diagnostic Sample Disclaimer (n = ${data.latestEvaluation.totalGoldenRecords})**: Evaluated against manually labelled blind ground-truth examples. This serves as a diagnostic benchmark to surface failure modes and classification alignment, not mathematical proof of broad model generalization.`);
       lines.push('');

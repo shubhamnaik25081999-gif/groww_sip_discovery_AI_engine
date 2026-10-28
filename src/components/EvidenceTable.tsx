@@ -23,6 +23,9 @@ interface EvidenceRecordItem {
   };
   entryMethod: string;
   isSynthetic: boolean;
+  verificationStatus?: 'content_verified' | 'link_checked' | 'user_entered' | 'unverified' | 'synthetic_fixture' | string | null;
+  verifiedAt?: string | null;
+  verifiedBy?: string | null;
   duplicateOfId: string | null;
   contentHash: string;
   createdAt: string;
@@ -374,15 +377,18 @@ export function EvidenceTable({ initialRecords }: { initialRecords: EvidenceReco
 
           {/* Provenance badge legend */}
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '11px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-            <span>Provenance:</span>
-            <span style={{ border: '1px solid var(--amber-400)', color: 'var(--amber-400)', padding: '1px 6px', borderRadius: '4px' }}>
-              ◆ Benchmark (Academic Fixture)
-            </span>
+            <span>Provenance Status:</span>
             <span style={{ border: '1px solid var(--emerald-400)', color: 'var(--emerald-400)', padding: '1px 6px', borderRadius: '4px' }}>
-              ● Live Verified
+              ● Content Verified
             </span>
             <span style={{ border: '1px solid var(--blue-400)', color: 'var(--blue-400)', padding: '1px 6px', borderRadius: '4px' }}>
+              ● Link Checked
+            </span>
+            <span style={{ border: '1px solid var(--purple-400)', color: 'var(--purple-400)', padding: '1px 6px', borderRadius: '4px' }}>
               ▲ User-Entered
+            </span>
+            <span style={{ border: '1px solid var(--amber-400)', color: 'var(--amber-400)', padding: '1px 6px', borderRadius: '4px' }}>
+              ◆ Synthetic Fixture
             </span>
             <span style={{ border: '1px dashed var(--text-muted)', color: 'var(--text-muted)', padding: '1px 6px', borderRadius: '4px' }}>
               ○ Unverified
@@ -494,38 +500,48 @@ export function EvidenceTable({ initialRecords }: { initialRecords: EvidenceReco
                           </p>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                            <span
-                              style={{
-                                border:
-                                  textProv === 'curated_benchmark'
-                                    ? '1px solid var(--amber-400)'
-                                    : textProv === 'verified_live' || textProv === 'verified'
-                                    ? '1px solid var(--emerald-400)'
-                                    : textProv === 'user_entered'
-                                    ? '1px solid var(--blue-400)'
-                                    : '1px dashed var(--text-muted)',
-                                color:
-                                  textProv === 'curated_benchmark'
-                                    ? 'var(--amber-400)'
-                                    : textProv === 'verified_live' || textProv === 'verified'
-                                    ? 'var(--emerald-400)'
-                                    : textProv === 'user_entered'
-                                    ? 'var(--blue-400)'
-                                    : 'var(--text-muted)',
-                                padding: '1px 6px',
-                                borderRadius: '3px',
-                                fontSize: '10px',
-                                fontWeight: 600,
-                              }}
-                            >
-                              {textProv === 'curated_benchmark'
-                                ? 'Benchmark Fixture'
-                                : textProv === 'verified_live' || textProv === 'verified'
-                                ? 'Live Verified'
-                                : textProv === 'user_entered'
+                            {(() => {
+                              const status = record.verificationStatus || (record.isSynthetic ? 'synthetic_fixture' : textProv);
+                              const isVerified = status === 'content_verified' || status === 'verified_live' || status === 'verified';
+                              const isLinkChecked = status === 'link_checked';
+                              const isUser = status === 'user_entered';
+                              const isSynth = status === 'synthetic_fixture' || status === 'curated_benchmark';
+
+                              const badgeColor = isVerified
+                                ? 'var(--emerald-400)'
+                                : isLinkChecked
+                                ? 'var(--blue-400)'
+                                : isUser
+                                ? 'var(--purple-400)'
+                                : isSynth
+                                ? 'var(--amber-400)'
+                                : 'var(--text-muted)';
+
+                              const badgeText = isVerified
+                                ? 'Content Verified'
+                                : isLinkChecked
+                                ? 'Link Checked'
+                                : isUser
                                 ? 'User-Entered'
-                                : 'Unverified'}
-                            </span>
+                                : isSynth
+                                ? 'Synthetic Fixture'
+                                : 'Unverified';
+
+                              return (
+                                <span
+                                  style={{
+                                    border: `1px ${status === 'unverified' ? 'dashed' : 'solid'} ${badgeColor}`,
+                                    color: badgeColor,
+                                    padding: '1px 6px',
+                                    borderRadius: '3px',
+                                    fontSize: '10px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {badgeText}
+                                </span>
+                              );
+                            })()}
 
                             {record.investorContext && (
                               <span style={{ fontStyle: 'italic', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

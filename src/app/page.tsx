@@ -112,13 +112,13 @@ export default async function IntelligenceOverviewPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span className="badge badge-amber" style={{ fontSize: '11px' }}>Provenance Audit</span>
           <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
-            <strong>Evidence Cohort Status:</strong> {provBreakdown.isBenchmarkCohort ? 'Academic Fellowship Benchmark Dataset (20 curated qualitative excerpts based on authentic investor discourse; permalinks are illustrative fixtures, unverified live URLs)' : `${provBreakdown.verifiedLive} live verified, ${provBreakdown.curatedBenchmark} benchmark fixtures, ${provBreakdown.userEntered} user submissions`}
+            <strong>Evidence Status:</strong> {provBreakdown.contentVerified + provBreakdown.linkChecked} verified evidence, {provBreakdown.unverified + provBreakdown.userEntered} unverified submissions, {provBreakdown.syntheticFixture} synthetic fixtures (dev/test)
           </span>
         </div>
         <div style={{ display: 'flex', gap: '8px', fontSize: '11px', flexWrap: 'wrap' }}>
-          <span className="badge badge-zinc">Live Verified: {provBreakdown.verifiedLive}</span>
-          <span className="badge badge-amber">Curated Benchmark: {provBreakdown.curatedBenchmark}</span>
-          <span className="badge badge-blue">User Submissions: {provBreakdown.userEntered}</span>
+          <span className="badge badge-emerald">Verified: {provBreakdown.contentVerified + provBreakdown.linkChecked}</span>
+          <span className="badge badge-amber">Unverified / User: {provBreakdown.unverified + provBreakdown.userEntered}</span>
+          <span className="badge badge-zinc">Synthetic Fixtures: {provBreakdown.syntheticFixture}</span>
         </div>
       </div>
 
@@ -134,7 +134,7 @@ export default async function IntelligenceOverviewPage() {
               {allRecords.length}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              {provBreakdown.curatedBenchmark} benchmark · {provBreakdown.userEntered} manual · {provBreakdown.verifiedLive} live verified
+              {provBreakdown.contentVerified + provBreakdown.linkChecked} verified · {provBreakdown.unverified + provBreakdown.userEntered} unverified · {provBreakdown.syntheticFixture} synthetic fixtures
             </div>
           </div>
 

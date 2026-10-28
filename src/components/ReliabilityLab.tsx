@@ -84,6 +84,87 @@ export function ReliabilityLab({
         </div>
       )}
 
+      {/* Model & Evaluation Provenance Banner */}
+      {evalResult && (
+        <div
+          className="card"
+          style={{
+            padding: '14px 18px',
+            background: 'var(--bg-surface-raised)',
+            border: '1px solid var(--border-subtle)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            fontSize: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Evaluation Target:</span>
+            <span className="badge badge-purple" style={{ fontFamily: 'var(--font-mono)' }}>
+              Provider: {evalResult.provider || 'simulated-double'}
+            </span>
+            <span className="badge badge-zinc" style={{ fontFamily: 'var(--font-mono)' }}>
+              Model: {evalResult.model || 'test-double'} ({evalResult.modelVersion || '1.0.0'})
+            </span>
+            <span className="badge badge-emerald">
+              Golden Set: {evalResult.totalGoldenRecords} items
+            </span>
+          </div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+            Evaluated on: {evalResult.evaluatedAt ? new Date(evalResult.evaluatedAt).toLocaleString() : 'N/A'}
+          </div>
+        </div>
+      )}
+
+      {/* Simulated Double Warning Banner */}
+      {evalResult && (evalResult.isSimulated || evalResult.provider === 'fake') && (
+        <div
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid var(--red-border)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+            fontSize: '13px',
+            color: 'var(--red-400)',
+          }}
+        >
+          <span style={{ fontSize: '18px', lineHeight: 1 }}>🧪</span>
+          <div>
+            <strong>SIMULATED TEST BENCHMARK (FakeAIProvider Test Double):</strong>{' '}
+            This evaluation was executed against the deterministic simulated test double for offline automated test suites.
+            <em> These agreement numbers represent software test suite assertions, NOT real-world Gemini AI model accuracy or live inference capability.</em>
+          </div>
+        </div>
+      )}
+
+      {/* Incomplete Evaluation Warning */}
+      {evalResult && evalResult.isIncomplete && (
+        <div
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--amber-glow)',
+            border: '1px solid var(--amber-border)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+            fontSize: '13px',
+            color: 'var(--amber-400)',
+          }}
+        >
+          <span style={{ fontSize: '18px', lineHeight: 1 }}>⚠️</span>
+          <div>
+            <strong>INCOMPLETE EVALUATION:</strong>{' '}
+            {evalResult.missingDetails || 'Evaluation is missing independent labels or eligible predictions for some records. Metrics may be partial.'}
+          </div>
+        </div>
+      )}
+
       {/* Small Sample Warning Invariant */}
       {evalResult && (evalResult.smallSampleWarning || evalResult.totalGoldenRecords < 50) && (
         <div
@@ -124,11 +205,15 @@ export function ReliabilityLab({
         </div>
 
         <div className="card" style={{ padding: '16px 20px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Exact Theme Agreement</span>
-          <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--emerald-400)', marginTop: '4px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            {evalResult?.isSimulated || evalResult?.provider === 'fake' ? 'Simulated Agreement' : 'Exact Theme Agreement'}
+          </span>
+          <div style={{ fontSize: '28px', fontWeight: 700, color: evalResult?.isSimulated ? 'var(--text-muted)' : 'var(--emerald-400)', marginTop: '4px' }}>
             {evalResult ? `${(evalResult.accuracy * 100).toFixed(1)}%` : '0%'}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Ground-truth match rate</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+            {evalResult?.isSimulated ? 'Deterministic test assertion' : 'Ground-truth match rate'}
+          </span>
         </div>
 
         <div className="card" style={{ padding: '16px 20px' }}>

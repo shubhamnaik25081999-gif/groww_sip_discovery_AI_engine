@@ -6,6 +6,8 @@ import {
   contradictions,
   researchQuestions,
   recordAnalyses,
+  reviews,
+  opportunities,
 } from '@/db/schema';
 import { EvidenceService } from '@/services/evidence';
 import { AnalysisOrchestrator } from '@/services/ai';
@@ -14,6 +16,7 @@ import { EvaluationService } from '@/services/evaluation';
 import { OpportunityService } from '@/services/opportunity';
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
+import { computeContentHash } from '@/lib/hashing';
 
 export const BENCHMARK_ITEMS = [
   {
@@ -218,10 +221,19 @@ export const BENCHMARK_ITEMS = [
   },
 ];
 
-export async function seedBenchmarkData() {
-  await initializeDatabase();
+/**
+ * Explicit development-only destructive reset.
+ * Strictly requires confirmation string 'CONFIRM_DESTRUCTIVE_RESET'.
+ * Never executed during normal seeding.
+ */
+export async function dangerousResetDatabase(options: { confirmation: string }) {
+  if (options?.confirmation !== 'CONFIRM_DESTRUCTIVE_RESET') {
+    throw new Error(
+      'Destructive reset aborted: Invalid confirmation string. Pass confirmation: "CONFIRM_DESTRUCTIVE_RESET" to execute.'
+    );
+  }
 
-  // Clear existing data to ensure pristine, deterministic benchmark state
+  await initializeDatabase();
   await client.executeMultiple(`
     PRAGMA foreign_keys = OFF;
     DELETE FROM failure_cases;
@@ -243,41 +255,72 @@ export async function seedBenchmarkData() {
     PRAGMA foreign_keys = ON;
   `);
 
+  return { success: true, message: 'All tables cleanly reset.' };
+}
+
+export async function seedBenchmarkData() {
+  await initializeDatabase();
+
   const createdRecordIds: { [url: string]: string } = {};
 
-  // 1. Ingest Evidence Records & Register Golden Labels
+  // 1. Idempotently Ingest Synthetic Benchmark Fixtures & Register Golden Labels
   for (const item of BENCHMARK_ITEMS) {
-    const res = await EvidenceService.createManualRecord(
-      {
-        sourceUrl: item.sourceUrl,
-        platform: item.platform as any,
-        collectedAt: item.collectedAt,
-        originalText: item.originalText,
-        investorContext: item.investorContext,
-        journeyStage: item.journeyStage as any,
-        fieldProvenance: {
-          sourceUrl: 'curated_benchmark',
-          platform: 'curated_benchmark',
-          collectedAt: 'curated_benchmark',
-          originalText: 'curated_benchmark',
-          investorContext: 'user_entered',
-          journeyStage: 'user_entered',
-        },
-        sourceMetadata: {
-          curatedBy: 'NextLeap PM Fellowship Research Lead',
-          attributionNote: 'Authentic investor feedback excerpt curated from public forum discourse; permalink is an illustrative academic fixture.',
-        },
-        entryMethod: 'fixture',
-        isSynthetic: false,
-      },
-      'Fellowship Benchmark Ingestion'
-    );
+    const contentHash = computeContentHash(item.originalText);
+    const existing = await db
+      .select()
+      .from(evidenceRecords)
+      .where(eq(evidenceRecords.contentHash, contentHash))
+      .limit(1);
 
-    createdRecordIds[item.sourceUrl] = res.id;
+    let recordId: string;
 
-    // Register golden-set ground truth
+    if (existing.length > 0) {
+      recordId = existing[0].id;
+      // Ensure synthetic and verification status are safely marked without deleting data
+      await db
+        .update(evidenceRecords)
+        .set({
+          isSynthetic: true,
+          verificationStatus: 'synthetic_fixture',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(evidenceRecords.id, recordId));
+    } else {
+      const res = await EvidenceService.createManualRecord(
+        {
+          sourceUrl: item.sourceUrl,
+          platform: item.platform as any,
+          collectedAt: item.collectedAt,
+          originalText: item.originalText,
+          investorContext: item.investorContext,
+          journeyStage: item.journeyStage as any,
+          fieldProvenance: {
+            sourceUrl: 'curated_benchmark',
+            platform: 'curated_benchmark',
+            collectedAt: 'curated_benchmark',
+            originalText: 'curated_benchmark',
+            investorContext: 'user_entered',
+            journeyStage: 'user_entered',
+          },
+          sourceMetadata: {
+            curatedBy: 'NextLeap PM Fellowship Research Lead',
+            attributionNote:
+              'Synthetic / illustrative benchmark fixture developed for testing and golden evaluation.',
+          },
+          entryMethod: 'fixture',
+          isSynthetic: true,
+          verificationStatus: 'synthetic_fixture',
+        },
+        'Fellowship Benchmark Ingestion'
+      );
+      recordId = res.id;
+    }
+
+    createdRecordIds[item.sourceUrl] = recordId;
+
+    // Register golden-set ground truth (upsert logic inside addGoldenLabel prevents duplicates)
     await EvaluationService.addGoldenLabel({
-      evidenceId: res.id,
+      evidenceId: recordId,
       themeName: item.goldenTheme,
       specialLabel: item.goldenTheme === 'insufficient_evidence' ? 'insufficient_evidence' : 'standard',
       journeyStage: item.journeyStage,
@@ -287,20 +330,23 @@ export async function seedBenchmarkData() {
     });
   }
 
-  // 2. Execute deterministic AI analysis across all 20 records
+  // 2. Execute deterministic simulated analysis on benchmark records without duplicating existing runs
   const runSummary = await AnalysisOrchestrator.executeRun({
     providerName: 'fake',
     maxRecords: 50,
+    skipAlreadyAnalyzed: true,
   });
 
-  // 3. Document 3 genuine failure cases with detailed post-mortems
+  // 3. Document 3 genuine failure cases with detailed post-mortems if not already recorded
   const allAnalyses = await db.select().from(recordAnalyses).all();
   const allThemes = await db.select().from(themes).all();
+  const allExistingReviews = await db.select().from(reviews).all();
+  const reviewedEvidenceIds = new Set(allExistingReviews.map((r) => r.evidenceId));
 
   // Failure Case 1: Overconfidence on ambiguous mental model conflating utility bill with SIP
   const rec12Id = createdRecordIds['https://play.google.com/store/apps/details?id=com.nextbillion.groww&reviewId=gp_112'];
   const analysis12 = allAnalyses.find((a) => a.evidenceId === rec12Id);
-  if (analysis12) {
+  if (analysis12 && !reviewedEvidenceIds.has(rec12Id)) {
     await ReviewService.submitReview({
       recordAnalysisId: analysis12.id,
       evidenceId: rec12Id,
@@ -321,12 +367,13 @@ export async function seedBenchmarkData() {
           'Prompt and validator require checking whether user explicitly indicates they expected manual payment control before assigning mandate operational friction.',
       },
     });
+    reviewedEvidenceIds.add(rec12Id);
   }
 
   // Failure Case 2: Sarcasm / frustration misclassification on support delay
   const rec13Id = createdRecordIds['https://twitter.com/amit_techguy/status/18012938102'];
   const analysis13 = allAnalyses.find((a) => a.evidenceId === rec13Id);
-  if (analysis13) {
+  if (analysis13 && !reviewedEvidenceIds.has(rec13Id)) {
     await ReviewService.submitReview({
       recordAnalysisId: analysis13.id,
       evidenceId: rec13Id,
@@ -347,12 +394,13 @@ export async function seedBenchmarkData() {
           'Cross-link support latency feedback with explicit financial damage markers (ECS bounce, penalty amounts).',
       },
     });
+    reviewedEvidenceIds.add(rec13Id);
   }
 
   // Failure Case 3: Accidental Stop SIP vs Pause nomenclature confusion
   const rec19Id = createdRecordIds['https://reddit.com/r/Groww/comments/b712aa/stop_sip_vs_pause'];
   const analysis19 = allAnalyses.find((a) => a.evidenceId === rec19Id);
-  if (analysis19) {
+  if (analysis19 && !reviewedEvidenceIds.has(rec19Id)) {
     await ReviewService.submitReview({
       recordAnalysisId: analysis19.id,
       evidenceId: rec19Id,
@@ -373,12 +421,14 @@ export async function seedBenchmarkData() {
           'Instruct extraction prompt to distinguish upstream user action trigger (cancellation/pause intent) from downstream technical aftermath.',
       },
     });
+    reviewedEvidenceIds.add(rec19Id);
   }
 
-  // 4. Confirm remaining benchmark records as reviewed
+  // 4. Confirm remaining benchmark records if unreviewed
   for (const item of BENCHMARK_ITEMS) {
     const recId = createdRecordIds[item.sourceUrl];
     if (recId === rec12Id || recId === rec13Id || recId === rec19Id) continue;
+    if (reviewedEvidenceIds.has(recId)) continue;
 
     const analysis = allAnalyses.find((a) => a.evidenceId === recId);
     if (!analysis) continue;
@@ -390,15 +440,22 @@ export async function seedBenchmarkData() {
       reviewer: 'Fellowship Ground Truth Reviewer',
       rationale: 'Verified agreement with qualitative sentiment and contextual lifecycle stage.',
     });
+    reviewedEvidenceIds.add(recId);
   }
 
-  // 5. Seed candidate opportunities grounded in evidence
+  // 5. Seed candidate opportunities grounded in evidence (idempotent by title)
+  const existingOpps = await db.select().from(opportunities).all();
+  const existingOppTitles = new Set(existingOpps.map((o) => o.title));
+
   const mandateTheme = allThemes.find((t) => t.name.includes('Autopay'));
-  if (mandateTheme) {
+  const opp1Title = 'Proactive Mandate Health & Pre-Debit Alert System';
+  if (mandateTheme && !existingOppTitles.has(opp1Title)) {
     await OpportunityService.createOpportunity({
-      title: 'Proactive Mandate Health & Pre-Debit Alert System',
-      problemStatement: 'First-time investors encounter surprise bank overdraft charges (up to 590 Rs) and silent mandate drops because debits occur without 48-hour balance warnings or penalty-free auto-retry.',
-      hypothesisOnRetention: 'Providing proactive WhatsApp/SMS pre-debit notifications and a 3-day penalty-free recovery window will increase 12-month active SIP retention by rescuing inadvertent instalment drops.',
+      title: opp1Title,
+      problemStatement:
+        'First-time investors encounter surprise bank overdraft charges (up to 590 Rs) and silent mandate drops because debits occur without 48-hour balance warnings or penalty-free auto-retry.',
+      hypothesisOnRetention:
+        'Providing proactive WhatsApp/SMS pre-debit notifications and a 3-day penalty-free recovery window is hypothesized to increase 12-month active SIP retention by rescuing inadvertent instalment drops.',
       themeIds: [mandateTheme.id],
       humanScores: {
         userImpact: { score: 4.8, rationale: 'Bank penalties create acute financial distress and trust betrayal for beginners.', scoredBy: 'PM Fellow' },
@@ -407,14 +464,18 @@ export async function seedBenchmarkData() {
         potentialFeasibility: { score: 4.2, rationale: 'Standard webhook notifications and NPCI e-mandate retry APIs exist.', scoredBy: 'PM Fellow' },
       },
     });
+    existingOppTitles.add(opp1Title);
   }
 
   const dipTheme = allThemes.find((t) => t.name.includes('Loss Aversion'));
-  if (dipTheme) {
+  const opp2Title = 'First-Year Drawdown Context & Rupee-Cost-Averaging Coach';
+  if (dipTheme && !existingOppTitles.has(opp2Title)) {
     await OpportunityService.createOpportunity({
-      title: 'First-Year Drawdown Context & Rupee-Cost-Averaging Coach',
-      problemStatement: 'Inexperienced investors experiencing their first market dip in months 2-4 interpret portfolio volatility as permanent loss due to lack of in-situ context.',
-      hypothesisOnRetention: 'Displaying contextual historical recovery timelines and "units acquired at discount" metrics during drawdowns will prevent panic cancellations before month 6.',
+      title: opp2Title,
+      problemStatement:
+        'Inexperienced investors experiencing their first market dip in months 2-4 interpret portfolio volatility as permanent loss due to lack of in-situ context.',
+      hypothesisOnRetention:
+        'Displaying contextual historical recovery timelines and "units acquired at discount" metrics during drawdowns is hypothesized to prevent panic cancellations before month 6.',
       themeIds: [dipTheme.id],
       humanScores: {
         userImpact: { score: 4.2, rationale: 'Dramatically reduces investor anxiety and premature capital destruction.', scoredBy: 'PM Fellow' },
@@ -423,50 +484,70 @@ export async function seedBenchmarkData() {
         potentialFeasibility: { score: 4.6, rationale: 'UI educational cards and return calculator overlays require zero backend banking changes.', scoredBy: 'PM Fellow' },
       },
     });
+    existingOppTitles.add(opp2Title);
   }
 
-  // 6. Run initial evaluation
-  await EvaluationService.evaluateAnalysisRun(runSummary.runId);
-
-  // 7. Seed sample contradiction
-  const rAutopay = createdRecordIds['https://play.google.com/store/apps/details?id=com.nextbillion.groww&reviewId=gp_108'];
-  const rDeduct = createdRecordIds['https://play.google.com/store/apps/details?id=com.nextbillion.groww&reviewId=gp_112'];
-  if (rAutopay && rDeduct) {
-    await db.insert(contradictions).values({
-      id: crypto.randomUUID(),
-      title: 'Seamless Autopay Friction vs. Autonomous Double-Debit Risk',
-      description: 'Users on one side demand zero-click frictionless automatic payments, while budget-constrained users report catastrophic liquidity emergencies when automatic debits execute without manual confirmation.',
-      evidenceAId: rAutopay,
-      evidenceBId: rDeduct,
-      status: 'open',
-    });
+  // 6. Run evaluation on analysis run if available
+  if (runSummary.runId && runSummary.successfulRecords > 0) {
+    await EvaluationService.evaluateAnalysisRun(runSummary.runId);
+  } else {
+    // If skipped, check if any evaluation exists
+    const latestEval = await EvaluationService.getLatestEvaluation();
+    if (!latestEval) {
+      const latestRun = (await db.select().from(recordAnalyses).limit(1))[0];
+      if (latestRun) {
+        await EvaluationService.evaluateAnalysisRun(latestRun.runId);
+      }
+    }
   }
 
-  // 8. Seed sample open research questions
-  await db.insert(researchQuestions).values([
-    {
-      id: crypto.randomUUID(),
-      question: 'What percentage of month-3 cancellations are triggered by bank ECS bounce penalties vs voluntary market pullback?',
-      origin: 'ai_analysis',
-      relatedJourneyStage: 'autopay_failure_recovery',
-      status: 'open',
-    },
-    {
-      id: crypto.randomUUID(),
-      question: 'Do first-time investors who encounter a negative portfolio return in month 2 retain longer if educated on rupee-cost-averaging?',
-      origin: 'human_researcher',
-      relatedJourneyStage: 'market_dip_reaction',
-      status: 'investigating',
-    },
-    {
-      id: crypto.randomUUID(),
-      question: 'How many investors abandon SIP continuation simply due to changing salary credit dates from 1st to 10th of the month?',
-      origin: 'gap_tracker',
-      relatedJourneyStage: 'pause_cancellation',
-      status: 'answered',
-      answerSummary: 'Initial data suggests up to 14% of pause/cancellation requests correlate with payroll date shifts where rigid 30-day notice periods prevent timely rescheduling.',
-    },
-  ]);
+  // 7. Seed sample contradiction (idempotent)
+  const existingContradictions = await db.select().from(contradictions).all();
+  if (existingContradictions.length === 0) {
+    const rAutopay = createdRecordIds['https://play.google.com/store/apps/details?id=com.nextbillion.groww&reviewId=gp_108'];
+    const rDeduct = createdRecordIds['https://play.google.com/store/apps/details?id=com.nextbillion.groww&reviewId=gp_112'];
+    if (rAutopay && rDeduct) {
+      await db.insert(contradictions).values({
+        id: crypto.randomUUID(),
+        title: 'Seamless Autopay Friction vs. Autonomous Double-Debit Risk',
+        description:
+          'Users on one side demand zero-click frictionless automatic payments, while budget-constrained users report catastrophic liquidity emergencies when automatic debits execute without manual confirmation.',
+        evidenceAId: rAutopay,
+        evidenceBId: rDeduct,
+        status: 'open',
+      });
+    }
+  }
+
+  // 8. Seed sample open research questions (idempotent)
+  const existingQuestions = await db.select().from(researchQuestions).all();
+  if (existingQuestions.length === 0) {
+    await db.insert(researchQuestions).values([
+      {
+        id: crypto.randomUUID(),
+        question: 'What percentage of month-3 cancellations are triggered by bank ECS bounce penalties vs voluntary market pullback?',
+        origin: 'ai_analysis',
+        relatedJourneyStage: 'autopay_failure_recovery',
+        status: 'open',
+      },
+      {
+        id: crypto.randomUUID(),
+        question: 'Do first-time investors who encounter a negative portfolio return in month 2 retain longer if educated on rupee-cost-averaging?',
+        origin: 'human_researcher',
+        relatedJourneyStage: 'market_dip_reaction',
+        status: 'investigating',
+      },
+      {
+        id: crypto.randomUUID(),
+        question: 'How many investors abandon SIP continuation simply due to changing salary credit dates from 1st to 10th of the month?',
+        origin: 'gap_tracker',
+        relatedJourneyStage: 'pause_cancellation',
+        status: 'answered',
+        answerSummary:
+          'Initial data suggests up to 14% of pause/cancellation requests correlate with payroll date shifts where rigid 30-day notice periods prevent timely rescheduling.',
+      },
+    ]);
+  }
 
   return { success: true, count: BENCHMARK_ITEMS.length };
 }
